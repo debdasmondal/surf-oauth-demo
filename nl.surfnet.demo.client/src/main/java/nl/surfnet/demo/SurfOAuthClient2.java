@@ -48,6 +48,7 @@ import org.wso2.carbon.apimgt.api.APIManagementException;
 import org.wso2.carbon.apimgt.api.model.API;
 import org.wso2.carbon.apimgt.api.model.AccessTokenInfo;
 import org.wso2.carbon.apimgt.api.model.AccessTokenRequest;
+import org.wso2.carbon.apimgt.api.model.ApplicationConstants;
 import org.wso2.carbon.apimgt.api.model.KeyManagerConfiguration;
 import org.wso2.carbon.apimgt.api.model.OAuthAppRequest;
 import org.wso2.carbon.apimgt.api.model.OAuthApplicationInfo;
@@ -70,14 +71,15 @@ import java.util.Set;
  * This class provides the implementation to use "Apis" {@link "https://github.com/OAuth-Apis/apis"} for managing
  * OAuth clients and Tokens needed by WSO2 API Manager.
  */
-public class SurfOAuthClient extends AbstractKeyManager {
+public class SurfOAuthClient2 extends AbstractKeyManager {
 
-    private static final Log log = LogFactory.getLog(SurfOAuthClient.class);
+    private static final Log log = LogFactory.getLog(SurfOAuthClient2.class);
 
     // We need to maintain a mapping between Consumer Key and id. To get details of a specific client,
     // we need to call client registration endpoint using id.
-    Map<String, Long> nameIdMapping = new HashMap<String, Long>();
-
+    Map<String, String> nameIdMapping = new HashMap<String, String>();
+    private String registrationAccessToken = null;
+    
     private KeyManagerConfiguration configuration;
 
     /**
@@ -100,16 +102,25 @@ public class SurfOAuthClient extends AbstractKeyManager {
     public OAuthApplicationInfo createApplication(OAuthAppRequest oauthAppRequest) throws APIManagementException {
 
         OAuthApplicationInfo oAuthApplicationInfo = oauthAppRequest.getOAuthApplicationInfo();
+        OAuthApplicationInfo oAuthApplicationInfoResponse = null;
 
         log.debug("Creating a new oAuthApp in Authorization Server");
 
-        KeyManagerConfiguration config = KeyManagerHolder.getKeyManagerInstance().getKeyManagerConfiguration();
+       // KeyManagerConfiguration config = KeyManagerHolder.getKeyManagerInstance().getKeyManagerConfiguration();
 
         // Getting Client Registration Url and Access Token from Config.
-        String registrationEndpoint = config.getParameter(SurfClientConstants.CLIENT_REG_ENDPOINT);
-        String registrationToken = config.getParameter(SurfClientConstants.REGISTRAION_ACCESS_TOKEN);
+        String registrationEndpoint = configuration.getParameter(SurfClientConstants.CLIENT_REG_ENDPOINT);
+        		//"http://10.138.16.90:8080/auth/realms/openbanking/clients-registrations/default";
+        String registrationToken = configuration.getParameter(SurfClientConstants.REGISTRAION_ACCESS_TOKEN);
+        		//"eyJhbGciOiJIUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJhMDVlNDI4YS05MWI2LTQwY2EtYWRiNS1hYWYxZDEwNTdhNjUifQ.eyJqdGkiOiIxNmFiYjQ1Ni1iNDcxLTRkNzEtYjMzMy01NTlhZjY0ODQ3NmIiLCJleHAiOjE4MTQyNTA5MTQsIm5iZiI6MCwiaWF0IjoxNTU1MDUwOTE0LCJpc3MiOiJodHRwOi8vMTAuMTM4LjE2LjkwOjgwODAvYXV0aC9yZWFsbXMvb3BlbmJhbmtpbmciLCJhdWQiOiJodHRwOi8vMTAuMTM4LjE2LjkwOjgwODAvYXV0aC9yZWFsbXMvb3BlbmJhbmtpbmciLCJ0eXAiOiJJbml0aWFsQWNjZXNzVG9rZW4ifQ.d5E5P2Y1WVRjHmGXu1cJ0JC5a1qfXBgQ5gEFEVZUqlA";
+        
+        String applicationName = oAuthApplicationInfo.getClientName();
+        String keyType = (String) oAuthApplicationInfo.getParameter(ApplicationConstants.APP_KEY_TYPE);
+        if (keyType != null) {
+            applicationName = applicationName + "_" + keyType;
+        }
 
-        HttpPost httpPut = new HttpPost(registrationEndpoint.trim());
+        HttpPost httpPost = new HttpPost(registrationEndpoint.trim());
 
         HttpClient httpClient = getHttpClient();
 
@@ -117,21 +128,25 @@ public class SurfOAuthClient extends AbstractKeyManager {
         Map<String, Object> serverparams;
 
         try {
-            serverparams = getResourceServerParams(registrationEndpoint, registrationToken);
-
+           // serverparams = getResourceServerParams(registrationEndpoint, registrationToken);
+        	serverparams =  new HashMap<String, Object>();
             //putting client name
-            serverparams.put(SurfClientConstants.CLIENT_NAME, oauthAppRequest.getOAuthApplicationInfo().getClientName());
-            String jsonPayload = createJsonPayloadFromMap(serverparams);
+            serverparams.put("clientId", applicationName);
+            serverparams.put("serviceAccountsEnabled", Boolean.TRUE);
+            serverparams.put("directAccessGrantsEnabled", Boolean.TRUE);
+            
+            String jsonPayload = JSONObject.toJSONString(serverparams);
+            //createJsonPayloadFromMap(serverparams);
 
             log.debug("Payload for creating new client : " + jsonPayload);
 
-            httpPut.setEntity(new StringEntity(jsonPayload, SurfClientConstants.UTF_8));
-            httpPut.setHeader(SurfClientConstants.CONTENT_TYPE, SurfClientConstants.APPLICATION_JSON_CONTENT_TYPE);
+            httpPost.setEntity(new StringEntity(jsonPayload, SurfClientConstants.UTF_8));
+            httpPost.setHeader(SurfClientConstants.CONTENT_TYPE, SurfClientConstants.APPLICATION_JSON_CONTENT_TYPE);
 
             // Setting Authorization Header, with Access Token
-            httpPut.setHeader(SurfClientConstants.AUTHORIZATION, SurfClientConstants.BEARER + registrationToken);
+            httpPost.setHeader(SurfClientConstants.AUTHORIZATION, SurfClientConstants.BEARER + registrationToken);
 
-            HttpResponse response = httpClient.execute(httpPut);
+            HttpResponse response = httpClient.execute(httpPost);
             int responseCode = response.getStatusLine().getStatusCode();
 
             JSONObject parsedObject;
@@ -143,14 +158,17 @@ public class SurfOAuthClient extends AbstractKeyManager {
 
                 parsedObject = getParsedObjectByReader(reader);
                 if (parsedObject != null) {
-                    oAuthApplicationInfo = createOAuthAppfromResponse(parsedObject);
+                	oAuthApplicationInfoResponse = createOAuthAppfromResponse(parsedObject);
 
                     // We need the id when retrieving a single OAuth Client. So we have to maintain a mapping
                     // between the consumer key and the ID.
-                    nameIdMapping.put(oAuthApplicationInfo.getClientId(), (Long) oAuthApplicationInfo.getParameter
+                    nameIdMapping.put(oAuthApplicationInfoResponse.getClientId(), (String) oAuthApplicationInfoResponse.getParameter
                             ("id"));
+                    
+                    registrationAccessToken = (String) oAuthApplicationInfoResponse.getParameter
+                            ("registrationAccessToken");
 
-                    return oAuthApplicationInfo;
+                    return oAuthApplicationInfoResponse;
                 }
             } else {
                 handleException("Some thing wrong here while registering the new client " +
@@ -183,72 +201,7 @@ public class SurfOAuthClient extends AbstractKeyManager {
      */
     @Override
     public OAuthApplicationInfo updateApplication(OAuthAppRequest oauthAppRequest) throws APIManagementException {
-
-        log.debug("Updating OAuth Client..");
-
-        // We have to send the id with the update request.
-        String consumerKey = oauthAppRequest.getOAuthApplicationInfo().getClientId();
-
-        Long id = nameIdMapping.get(consumerKey);
-
-        if (id == null) {
-            return oauthAppRequest.getOAuthApplicationInfo();
-        }
-
-        String registrationUrl = configuration.getParameter(SurfClientConstants.CLIENT_REG_ENDPOINT);
-        String accessToken = configuration.getParameter(SurfClientConstants.REGISTRAION_ACCESS_TOKEN);
-        BufferedReader reader = null;
-        oauthAppRequest.getOAuthApplicationInfo().addParameter("id", id);
-
-        registrationUrl += "/" + id.toString();
-
-        HttpClient client = getHttpClient();
-        try {
-            String jsonPayload = createJsonPayloadFromOauthApplication(oauthAppRequest.getOAuthApplicationInfo());
-
-            log.debug("JSON Payload for update method : " + jsonPayload);
-
-            HttpPost httpPost = new HttpPost(registrationUrl);
-            httpPost.setEntity(new StringEntity(jsonPayload, "UTF8"));
-            httpPost.setHeader(SurfClientConstants.CONTENT_TYPE, SurfClientConstants.APPLICATION_JSON_CONTENT_TYPE);
-            httpPost.setHeader(SurfClientConstants.AUTHORIZATION, SurfClientConstants.BEARER + accessToken);
-            HttpResponse response = client.execute(httpPost);
-
-            int responseCode = response.getStatusLine().getStatusCode();
-
-            log.debug("Response Code from Server: " + responseCode);
-
-            JSONObject parsedObject;
-
-            HttpEntity entity = response.getEntity();
-            reader = new BufferedReader(new InputStreamReader(entity.getContent(), SurfClientConstants.UTF_8));
-
-            if (responseCode == HttpStatus.SC_CREATED || responseCode == HttpStatus.SC_OK) {
-                parsedObject = getParsedObjectByReader(reader);
-                if (parsedObject != null) {
-                    return createOAuthAppfromResponse(parsedObject);
-                } else {
-                    handleException("ParseObject is empty. Can not return oAuthApplicationInfo.");
-                }
-            } else {
-                handleException("Some thing wrong here when updating the Client for key." + oauthAppRequest
-                        .getOAuthApplicationInfo().getClientId() + ". Error " + "code" + responseCode);
-            }
-
-        } catch (UnsupportedEncodingException e) {
-            handleException("Some thing wrong here when Updating a Client for key " + oauthAppRequest
-                    .getOAuthApplicationInfo().getClientId(), e);
-        } catch (ParseException e) {
-            handleException("Error while parsing response json", e);
-        } catch (IOException e) {
-            handleException("Error while reading response body from Server ", e);
-        } finally {
-            if (reader != null) {
-                IOUtils.closeQuietly(reader);
-            }
-            client.getConnectionManager().shutdown();
-        }
-        return null;
+    	return oauthAppRequest.getOAuthApplicationInfo();
     }
 
     /**
@@ -259,43 +212,7 @@ public class SurfOAuthClient extends AbstractKeyManager {
      */
     @Override
     public void deleteApplication(String consumerKey) throws APIManagementException {
-
-        log.debug("Creating a new OAuth Client in Authorization Server..");
-
-        Long id = nameIdMapping.get(consumerKey);
-
-        String configURL = configuration.getParameter(SurfClientConstants.CLIENT_REG_ENDPOINT);
-        String configURLsAccessToken = configuration.getParameter(SurfClientConstants.REGISTRAION_ACCESS_TOKEN);
-        HttpClient client = getHttpClient();
-
-        try {
-
-            // Deletion has to be called providing the ID. If we don't have the ID we can't proceed with Delete.
-            if (id != null) {
-                configURL += "/" + id.toString();
-                HttpDelete httpDelete = new HttpDelete(configURL);
-
-                // Set Authorization Header
-                httpDelete.addHeader(SurfClientConstants.AUTHORIZATION, SurfClientConstants.BEARER + configURLsAccessToken);
-                HttpResponse response = client.execute(httpDelete);
-                int responseCode = response.getStatusLine().getStatusCode();
-                if (log.isDebugEnabled()) {
-                    log.debug("Delete application response code :  " + responseCode);
-                }
-                if (responseCode == HttpStatus.SC_OK ||
-                    responseCode == HttpStatus.SC_NO_CONTENT) {
-                    log.info("OAuth Client for consumer Id " + consumerKey + " has been successfully deleted");
-                    nameIdMapping.remove(consumerKey);
-                } else {
-                    handleException("Problem occurred while deleting client for Consumer Key " + consumerKey);
-                }
-            }
-
-        } catch (IOException e) {
-            handleException("Error while reading response body from Server ", e);
-        } finally {
-            client.getConnectionManager().shutdown();
-        }
+    	
     }
 
     /**
@@ -309,21 +226,16 @@ public class SurfOAuthClient extends AbstractKeyManager {
     public OAuthApplicationInfo retrieveApplication(String consumerKey) throws APIManagementException {
 
         HttpClient client = getHttpClient();
-
+        OAuthApplicationInfo oAuthApplicationInfoResponse = null;
         // First get the Id corresponding to consumerKey
-        Long id = nameIdMapping.get(consumerKey);
+      //  String id = nameIdMapping.get(consumerKey);
         String registrationURL = configuration.getParameter(SurfClientConstants.CLIENT_REG_ENDPOINT);
-        String accessToken = configuration.getParameter(SurfClientConstants.REGISTRAION_ACCESS_TOKEN);
+        		//"http://10.138.16.90:8080/auth/realms/openbanking/clients-registrations/default";
+        String accessToken = registrationAccessToken;
         BufferedReader reader = null;
+        registrationURL += "/" + consumerKey;
 
         try {
-
-            if (id != null) {
-                // To get the specific client, we have to call like
-                // http://192.168.52.5:8080/admin/resourceServer/251/client/355
-                log.debug("Found id : " + id.toString() + " for consumer key :" + consumerKey);
-                registrationURL += "/" + id.toString();
-            }
 
             HttpGet request = new HttpGet(registrationURL);
             //set authorization header.
@@ -351,11 +263,17 @@ public class SurfOAuthClient extends AbstractKeyManager {
                             JSONObject jsonObject = (JSONObject) object;
                             if ((jsonObject.get(SurfClientConstants.CLIENT_ID)).equals
                                     (consumerKey)) {
-                                return createOAuthAppfromResponse(jsonObject);
+                            	oAuthApplicationInfoResponse = createOAuthAppfromResponse(jsonObject);
+                            	 registrationAccessToken = (String) oAuthApplicationInfoResponse.getParameter
+                                         ("registrationAccessToken");
+                                return oAuthApplicationInfoResponse;
                             }
                         }
                     } else {
-                        return createOAuthAppfromResponse((JSONObject) parsedObject);
+                    	oAuthApplicationInfoResponse = createOAuthAppfromResponse((JSONObject) parsedObject);
+                    	 registrationAccessToken = (String) oAuthApplicationInfoResponse.getParameter
+                                 ("registrationAccessToken");
+                        return oAuthApplicationInfoResponse;
                     }
                 }
 
@@ -395,6 +313,7 @@ public class SurfOAuthClient extends AbstractKeyManager {
 
         if (clientId != null && clientSecret != null) {
             String tokenEp = configuration.getParameter(SurfClientConstants.TOKEN_ENDPOINT);
+            		//"http://10.138.16.90:8080/auth/realms/openbanking/protocol/openid-connect/token";
             if (tokenEp != null) {
                 HttpClient tokenEPClient = new DefaultHttpClient();
 
@@ -403,6 +322,7 @@ public class SurfOAuthClient extends AbstractKeyManager {
                 // Request parameters.
                 List<NameValuePair> revokeParams = new ArrayList<NameValuePair>();
                 revokeParams.add(new BasicNameValuePair(OAuth.OAUTH_GRANT_TYPE, "client_credentials"));
+               
                 String combinedKeySecret = clientId + ":" + clientSecret;
                 httpTokenPost.setHeader(SurfClientConstants.AUTHORIZATION, SurfClientConstants.BASIC + " " + Base64.encode
                         (combinedKeySecret.getBytes()));
@@ -429,7 +349,7 @@ public class SurfOAuthClient extends AbstractKeyManager {
                                 Long validityPeriod = (Long) jsonObject.get("expires_in");
                                 String[] scopes = null;
                                 if (jsonObject.get("scope") != null) {
-                                    scopes = ((String) jsonObject.get("scope")).split(",");
+                                    scopes = ((String) jsonObject.get("scope")).split(" ");
                                 }
                                 if (accessToken != null) {
                                     accessTokenInfo = new AccessTokenInfo();
@@ -465,26 +385,31 @@ public class SurfOAuthClient extends AbstractKeyManager {
     public AccessTokenInfo getTokenMetaData(String accessToken) throws APIManagementException {
         AccessTokenInfo tokenInfo = new AccessTokenInfo();
 
-        KeyManagerConfiguration config = KeyManagerHolder.getKeyManagerInstance().getKeyManagerConfiguration();
+        //KeyManagerConfiguration config = KeyManagerHolder.getKeyManagerInstance().getKeyManagerConfiguration();
 
-        String introspectionURL = config.getParameter(SurfClientConstants.INTROSPECTION_URL);
-        String introspectionConsumerKey = config.getParameter(SurfClientConstants.INTROSPECTION_CK);
-        String introspectionConsumerSecret = config.getParameter(SurfClientConstants.INTROSPECTION_CS);
+        String introspectionURL = configuration.getParameter(SurfClientConstants.INTROSPECTION_URL);
+        		//"http://10.138.16.90:8080/auth/realms/openbanking/protocol/openid-connect/token/introspect";
+        String introspectionConsumerKey = configuration.getParameter(SurfClientConstants.INTROSPECTION_CK);
+        		//"abc-fin-tect";
+        String introspectionConsumerSecret = configuration.getParameter(SurfClientConstants.INTROSPECTION_CS);
+        		//"3837c91e-2c4c-4f44-966c-fa8553a8e2c3";
         String encodedSecret = Base64.encode(new String(introspectionConsumerKey + ":" + introspectionConsumerSecret)
                                                      .getBytes());
 
         BufferedReader reader = null;
 
         try {
-            URIBuilder uriBuilder = new URIBuilder(introspectionURL);
-            uriBuilder.addParameter("access_token", accessToken);
-            uriBuilder.build();
-
-            HttpGet httpGet = new HttpGet(uriBuilder.build());
+            HttpPost httpPost = new HttpPost(introspectionURL);
             HttpClient client = new DefaultHttpClient();
 
-            httpGet.setHeader("Authorization", "Basic " + encodedSecret);
-            HttpResponse response = client.execute(httpGet);
+            httpPost.setHeader("Authorization", "Basic " + encodedSecret);
+            
+         // Request parameters.
+            List<NameValuePair> params = new ArrayList<NameValuePair>();
+            params.add(new BasicNameValuePair("token", accessToken));
+            httpPost.setEntity(new UrlEncodedFormEntity(params, "UTF-8"));
+            
+            HttpResponse response = client.execute(httpPost);
             int responseCode = response.getStatusLine().getStatusCode();
 
             if (log.isDebugEnabled()) {
@@ -495,7 +420,6 @@ public class SurfOAuthClient extends AbstractKeyManager {
             // "attributes":{}},"expires_in":1433059160531}
             HttpEntity entity = response.getEntity();
             JSONObject parsedObject;
-            String errorMessage = null;
             reader = new BufferedReader(new InputStreamReader(entity.getContent(), "UTF-8"));
 
             if (HttpStatus.SC_OK == responseCode) {
@@ -504,41 +428,27 @@ public class SurfOAuthClient extends AbstractKeyManager {
                 if (parsedObject != null) {
 
                     Map valueMap = parsedObject;
-                    Object principal = valueMap.get("principal");
-
-                    if (principal == null) {
-                        tokenInfo.setTokenValid(false);
-                        return tokenInfo;
-                    }
-                    Map principalMap = (Map) principal;
-                    String clientId = (String) principalMap.get("name");
-                    Long expiryTimeString = (Long) valueMap.get("expires_in");
+                    
+                    String clientId = (String) valueMap.get("client_id");
+                    Boolean isActive = (Boolean) valueMap.get("active");
 
                     // Returning false if mandatory attributes are missing.
-                    if (clientId == null || expiryTimeString == null) {
+                    if (clientId == null) {
                         tokenInfo.setTokenValid(false);
                         tokenInfo.setErrorcode(APIConstants.KeyValidationStatus.API_AUTH_ACCESS_TOKEN_EXPIRED);
                         return tokenInfo;
                     }
 
-                    long currentTime = System.currentTimeMillis();
-                    long expiryTime = expiryTimeString;
-                    if (expiryTime > currentTime) {
+                    if (isActive) {
+                    	
                         tokenInfo.setTokenValid(true);
+                        
+                        String[] scopes = ((String) valueMap.get("scope")).split(" ");
+                        tokenInfo.setScope(scopes);
                         tokenInfo.setConsumerKey(clientId);
-                        tokenInfo.setValidityPeriod(expiryTime - currentTime);
-                        // Considering Current Time as the issued time.
-                        tokenInfo.setIssuedTime(currentTime);
-                        JSONArray scopesArray = (JSONArray) valueMap.get("scopes");
+                        tokenInfo.setConsumerSecret(introspectionConsumerSecret);
+                        tokenInfo.setAccessToken(accessToken);
 
-                        if (scopesArray != null && !scopesArray.isEmpty()) {
-
-                            String[] scopes = new String[scopesArray.size()];
-                            for (int i = 0; i < scopes.length; i++) {
-                                scopes[i] = (String) scopesArray.get(i);
-                            }
-                            tokenInfo.setScope(scopes);
-                        }
                     } else {
                         tokenInfo.setTokenValid(false);
                         tokenInfo.setErrorcode(APIConstants.KeyValidationStatus.API_AUTH_ACCESS_TOKEN_INACTIVE);
@@ -566,8 +476,6 @@ public class SurfOAuthClient extends AbstractKeyManager {
                             e.getMessage(), e);
         } catch (IOException e) {
             handleException("Error has occurred while reading or closing buffer reader. " + e.getMessage(), e);
-        } catch (URISyntaxException e) {
-            handleException("Error occurred while building URL with params." + e.getMessage(), e);
         } catch (ParseException e) {
             handleException("Error while parsing response json " + e.getMessage(), e);
         } finally {
@@ -774,6 +682,10 @@ public class SurfOAuthClient extends AbstractKeyManager {
 
         Object id = responseMap.get("id");
         info.addParameter("id", id);
+        
+        Object registrationAccessToken = responseMap.get("registrationAccessToken");
+        info.addParameter("registrationAccessToken", registrationAccessToken);
+        
 
         Object contactName = responseMap.get(SurfClientConstants.CLIENT_CONTACT_NAME);
         if (contactName != null) {
@@ -785,7 +697,7 @@ public class SurfOAuthClient extends AbstractKeyManager {
             info.addParameter("contactMail", contactMail);
         }
 
-        Object scopes = responseMap.get(SurfClientConstants.SCOPES);
+        Object scopes = responseMap.get(SurfClientConstants.DEFAULT_SCOPES);
         if (scopes != null) {
             info.addParameter("scopes", scopes);
         }
@@ -832,7 +744,7 @@ public class SurfOAuthClient extends AbstractKeyManager {
     private void addToNameIdMap(JSONArray clientArray) {
         for (Object jsonObject : clientArray) {
             if (jsonObject instanceof JSONObject) {
-                Long id = (Long) ((JSONObject) jsonObject).get("id");
+                String id = (String) ((JSONObject) jsonObject).get("id");
                 String consumerId = (String) ((JSONObject) jsonObject).get(SurfClientConstants.CLIENT_ID);
                 nameIdMapping.put(consumerId, id);
             }
