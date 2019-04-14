@@ -78,7 +78,7 @@ public class SurfOAuthClient2 extends AbstractKeyManager {
     // We need to maintain a mapping between Consumer Key and id. To get details of a specific client,
     // we need to call client registration endpoint using id.
     Map<String, String> nameIdMapping = new HashMap<String, String>();
-    private String registrationAccessToken = null;
+    static Map<String, String> registrationAccessTokenMap = new HashMap<String, String>();
     
     private KeyManagerConfiguration configuration;
 
@@ -164,9 +164,9 @@ public class SurfOAuthClient2 extends AbstractKeyManager {
                     // between the consumer key and the ID.
                     nameIdMapping.put(oAuthApplicationInfoResponse.getClientId(), (String) oAuthApplicationInfoResponse.getParameter
                             ("id"));
+                    registrationAccessTokenMap.put(oAuthApplicationInfoResponse.getClientId(), (String) oAuthApplicationInfoResponse.getParameter
+                            ("registrationAccessToken"));
                     
-                    registrationAccessToken = (String) oAuthApplicationInfoResponse.getParameter
-                            ("registrationAccessToken");
 
                     return oAuthApplicationInfoResponse;
                 }
@@ -190,6 +190,17 @@ public class SurfOAuthClient2 extends AbstractKeyManager {
         }
         return null;
     }
+   /* public OAuthApplicationInfo createApplication(OAuthAppRequest oauthAppRequest) throws APIManagementException {
+    	
+    	 String introspectionConsumerKey = configuration.getParameter(SurfClientConstants.INTROSPECTION_CK);
+    	 String introspectionConsumerSecret = configuration.getParameter(SurfClientConstants.INTROSPECTION_CS);
+ 
+    	OAuthApplicationInfo info = new OAuthApplicationInfo();
+        info.setClientId(introspectionConsumerKey);
+        info.setClientSecret(introspectionConsumerSecret);
+        
+        return info;
+    }*/
 
     /**
      * This method will update an existing OAuth Client.
@@ -231,7 +242,8 @@ public class SurfOAuthClient2 extends AbstractKeyManager {
       //  String id = nameIdMapping.get(consumerKey);
         String registrationURL = configuration.getParameter(SurfClientConstants.CLIENT_REG_ENDPOINT);
         		//"http://10.138.16.90:8080/auth/realms/openbanking/clients-registrations/default";
-        String accessToken = registrationAccessToken;
+        String accessToken = registrationAccessTokenMap.get(consumerKey);
+        
         BufferedReader reader = null;
         registrationURL += "/" + consumerKey;
 
@@ -264,21 +276,21 @@ public class SurfOAuthClient2 extends AbstractKeyManager {
                             if ((jsonObject.get(SurfClientConstants.CLIENT_ID)).equals
                                     (consumerKey)) {
                             	oAuthApplicationInfoResponse = createOAuthAppfromResponse(jsonObject);
-                            	 registrationAccessToken = (String) oAuthApplicationInfoResponse.getParameter
-                                         ("registrationAccessToken");
+                            	 registrationAccessTokenMap.put(oAuthApplicationInfoResponse.getClientId(), (String) oAuthApplicationInfoResponse.getParameter
+                                         ("registrationAccessToken"));
                                 return oAuthApplicationInfoResponse;
                             }
                         }
                     } else {
                     	oAuthApplicationInfoResponse = createOAuthAppfromResponse((JSONObject) parsedObject);
-                    	 registrationAccessToken = (String) oAuthApplicationInfoResponse.getParameter
-                                 ("registrationAccessToken");
+                    	registrationAccessTokenMap.put(oAuthApplicationInfoResponse.getClientId(), (String) oAuthApplicationInfoResponse.getParameter
+                                ("registrationAccessToken"));
                         return oAuthApplicationInfoResponse;
                     }
                 }
 
             } else {
-                handleException("Something went wrong while retrieving client for consumer key " + consumerKey);
+                handleException("Something went wrong while retrieving client for consumer key " + consumerKey + "\n Token.." +accessToken);
             }
 
         } catch (ParseException e) {
@@ -297,7 +309,15 @@ public class SurfOAuthClient2 extends AbstractKeyManager {
     public AccessTokenRequest buildAccessTokenRequestFromOAuthApp(OAuthApplicationInfo oAuthApplication,
                                                                   AccessTokenRequest tokenRequest)
             throws APIManagementException {
-        return null;
+    	
+    	AccessTokenRequest response = new AccessTokenRequest();
+    	
+    	response.setClientId(oAuthApplication.getClientId());
+    	response.setClientSecret(oAuthApplication.getClientSecret());
+    	
+    	log.info("buildAccessTokenRequestFromOAuthApp called.." + oAuthApplication.getClientId() + "secret.." + oAuthApplication.getClientSecret());
+    	
+        return response;
     }
 
     @Override
@@ -750,4 +770,5 @@ public class SurfOAuthClient2 extends AbstractKeyManager {
             }
         }
     }
+   
 }

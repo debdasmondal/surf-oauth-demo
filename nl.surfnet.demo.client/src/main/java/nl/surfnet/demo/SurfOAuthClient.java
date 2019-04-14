@@ -379,7 +379,13 @@ public class SurfOAuthClient extends AbstractKeyManager {
     public AccessTokenRequest buildAccessTokenRequestFromOAuthApp(OAuthApplicationInfo oAuthApplication,
                                                                   AccessTokenRequest tokenRequest)
             throws APIManagementException {
-        return null;
+    	
+    	AccessTokenRequest response = new AccessTokenRequest();
+    	
+    	response.setClientId(oAuthApplication.getClientId());
+    	response.setClientSecret(oAuthApplication.getClientSecret());
+    	
+        return response;
     }
 
     @Override
