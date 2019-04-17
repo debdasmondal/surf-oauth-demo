@@ -79,6 +79,7 @@ public class SurfOAuthClient2 extends AbstractKeyManager {
     // we need to call client registration endpoint using id.
     Map<String, String> nameIdMapping = new HashMap<String, String>();
     static Map<String, String> registrationAccessTokenMap = new HashMap<String, String>();
+    static Map<String, String> clientIdSecretMap = new HashMap<String, String>();
     
     private KeyManagerConfiguration configuration;
 
@@ -278,6 +279,9 @@ public class SurfOAuthClient2 extends AbstractKeyManager {
                             	oAuthApplicationInfoResponse = createOAuthAppfromResponse(jsonObject);
                             	 registrationAccessTokenMap.put(oAuthApplicationInfoResponse.getClientId(), (String) oAuthApplicationInfoResponse.getParameter
                                          ("registrationAccessToken"));
+                            	 
+                            	 clientIdSecretMap.put(oAuthApplicationInfoResponse.getClientId(),oAuthApplicationInfoResponse.getClientSecret());
+                            	 
                                 return oAuthApplicationInfoResponse;
                             }
                         }
@@ -285,6 +289,7 @@ public class SurfOAuthClient2 extends AbstractKeyManager {
                     	oAuthApplicationInfoResponse = createOAuthAppfromResponse((JSONObject) parsedObject);
                     	registrationAccessTokenMap.put(oAuthApplicationInfoResponse.getClientId(), (String) oAuthApplicationInfoResponse.getParameter
                                 ("registrationAccessToken"));
+                    	clientIdSecretMap.put(oAuthApplicationInfoResponse.getClientId(),oAuthApplicationInfoResponse.getClientSecret());
                         return oAuthApplicationInfoResponse;
                     }
                 }
@@ -408,21 +413,24 @@ public class SurfOAuthClient2 extends AbstractKeyManager {
         //KeyManagerConfiguration config = KeyManagerHolder.getKeyManagerInstance().getKeyManagerConfiguration();
 
         String introspectionURL = configuration.getParameter(SurfClientConstants.INTROSPECTION_URL);
-        		//"http://10.138.16.90:8080/auth/realms/openbanking/protocol/openid-connect/token/introspect";
+        		//"http://localhost:8080/auth/realms/MyFirsstRealm/protocol/openid-connect/token/introspect";
         String introspectionConsumerKey = configuration.getParameter(SurfClientConstants.INTROSPECTION_CK);
-        		//"abc-fin-tect";
+        		//"xyz-fin-tech";
         String introspectionConsumerSecret = configuration.getParameter(SurfClientConstants.INTROSPECTION_CS);
-        		//"3837c91e-2c4c-4f44-966c-fa8553a8e2c3";
+        		//"da4cc164-e682-468f-ad90-ee8a2da40ebc";
         String encodedSecret = Base64.encode(new String(introspectionConsumerKey + ":" + introspectionConsumerSecret)
                                                      .getBytes());
 
         BufferedReader reader = null;
+        
+        log.error("Info.....introspectionConsumerKey : " + introspectionConsumerKey + " introspectionConsumerSecret.." + introspectionConsumerSecret);
 
         try {
             HttpPost httpPost = new HttpPost(introspectionURL);
             HttpClient client = new DefaultHttpClient();
 
             httpPost.setHeader("Authorization", "Basic " + encodedSecret);
+            httpPost.setHeader("Content-Type", "application/x-www-form-urlencoded");
             
          // Request parameters.
             List<NameValuePair> params = new ArrayList<NameValuePair>();
@@ -432,9 +440,10 @@ public class SurfOAuthClient2 extends AbstractKeyManager {
             HttpResponse response = client.execute(httpPost);
             int responseCode = response.getStatusLine().getStatusCode();
 
-            if (log.isDebugEnabled()) {
+            /*if (log.isDebugEnabled()) {
                 log.debug("HTTP Response code : " + responseCode);
-            }
+            }*/
+            log.error("Info.....HTTP Response code : " + responseCode);
 
             // {"audience":"MappedClient","scopes":["test"],"principal":{"name":"mappedclient","roles":[],"groups":[],"adminPrincipal":false,
             // "attributes":{}},"expires_in":1433059160531}
@@ -451,6 +460,8 @@ public class SurfOAuthClient2 extends AbstractKeyManager {
                     
                     String clientId = (String) valueMap.get("client_id");
                     Boolean isActive = (Boolean) valueMap.get("active");
+                    
+                    log.error("Info....clientId......" + clientId + "isActive....." + isActive);
 
                     // Returning false if mandatory attributes are missing.
                     if (clientId == null) {
@@ -460,13 +471,18 @@ public class SurfOAuthClient2 extends AbstractKeyManager {
                     }
 
                     if (isActive) {
-                    	
+                    	long currentTime = System.currentTimeMillis();
+                    	tokenInfo.setValidityPeriod(3000);
+                        // Considering Current Time as the issued time.
+                        tokenInfo.setIssuedTime(currentTime);
                         tokenInfo.setTokenValid(true);
                         
                         String[] scopes = ((String) valueMap.get("scope")).split(" ");
                         tokenInfo.setScope(scopes);
-                        tokenInfo.setConsumerKey(clientId);
-                        tokenInfo.setConsumerSecret(introspectionConsumerSecret);
+                        tokenInfo.setConsumerKey(clientId);//clientIdSecretMap
+                       // tokenInfo.setConsumerSecret(introspectionConsumerSecret);
+                        tokenInfo.setConsumerSecret(clientIdSecretMap.get(clientId));
+                        log.error("Info....clientSecret......" + clientIdSecretMap.get(clientId));
                         tokenInfo.setAccessToken(accessToken);
 
                     } else {
@@ -504,6 +520,20 @@ public class SurfOAuthClient2 extends AbstractKeyManager {
 
         return tokenInfo;
     }
+    /*public AccessTokenInfo getTokenMetaData(String accessToken) throws APIManagementException {
+        AccessTokenInfo tokenInfo = new AccessTokenInfo();
+
+        
+
+       
+
+                     
+                        tokenInfo.setTokenValid(true);
+                        
+                        tokenInfo.setConsumerKey("MyApplication_15_PRODUCTION");
+
+        return tokenInfo;
+    }*/
 
     @Override
     public KeyManagerConfiguration getKeyManagerConfiguration() throws APIManagementException {
